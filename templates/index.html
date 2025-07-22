@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Analysis Uploader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #00D4FF 0%, #3B82F6 100%);
+        }
+        
+        .upload-border {
+            border: 2px dashed #CBD5E1;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-border:hover {
+            border-color: #00D4FF;
+        }
+        
+        .upload-border.dragover {
+            border-color: #00D4FF;
+            background-color: #F0F9FF;
+        }
+
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+
+        .file-item {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            flex-shrink: 0; /* Prevent dot from shrinking */
+        }
+
+        .status-uploading { background-color: #3B82F6; }
+        .status-success { background-color: #10B981; }
+        .status-error { background-color: #EF4444; }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-2xl relative">
+        <button id="closeBtn" class="absolute top-6 right-6 text-gray-400 hover:text-gray-600 text-2xl font-light">
+            ×
+        </button>
+
+        <h2 class="text-2xl font-bold text-gray-800 mb-8">Upload & Analyze Files</h2>
+
+        <div class="flex flex-col md:flex-row gap-8">
+            <div class="flex-1">
+                <div id="uploadArea" class="upload-border rounded-2xl p-12 text-center">
+                    <div class="mb-4">
+                        <svg class="mx-auto w-16 h-16 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-4-4V7a4 4 0 014-4h1.586A2 2 0 0110.172 2.586L10.586 2.172A2 2 0 0112 1.586V1.586m5.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+
+                    <p class="text-gray-600 mb-4">
+                        Drag files to upload<br>
+                        <span class="text-gray-400">or</span>
+                    </p>
+
+                    <button id="browseBtn" class="bg-white border-2 border-cyan-400 text-cyan-400 px-6 py-2 rounded-full hover:bg-cyan-50 transition-colors">
+                        Browse Files
+                    </button>
+
+                    <div class="mt-6 text-xs text-gray-400">
+                        <div>Max file size: <span class="font-medium">50MB</span></div>
+                        <div>Supported file types: <span class="font-medium">JPG, PNG</span></div>
+                    </div>
+                </div>
+
+                <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png" class="hidden">
+            </div>
+
+            <div class="w-full md:w-80">
+                <div id="fileList" class="space-y-3 max-h-96 overflow-y-auto pr-2">
+                    </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const browseBtn = document.getElementById('browseBtn');
+    const fileList = document.getElementById('fileList');
+    const closeBtn = document.getElementById('closeBtn');
+
+    // --- Helper Functions ---
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // --- UI Update Functions ---
+    function createFileItem(file) {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item bg-gray-50 rounded-lg p-4';
+        
+        fileItem.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center min-w-0">
+                    <span class="status-dot status-uploading"></span>
+                    <span class="text-sm font-medium text-gray-700 truncate" title="${file.name}">${file.name}</span>
+                </div>
+                <button class="remove-btn text-gray-400 hover:text-gray-600 flex-shrink-0">×</button>
+            </div>
+            <div class="text-xs text-gray-500 mb-2">${formatFileSize(file.size)}</div>
+            <div class="w-full bg-gray-200 rounded-full h-1 mb-3">
+                <div class="progress-bar bg-blue-500 h-1 rounded-full" style="width: 5%"></div>
+            </div>
+            <div class="result-container" style="display: none;">
+                </div>
+        `;
+
+        const removeBtn = fileItem.querySelector('.remove-btn');
+        removeBtn.addEventListener('click', () => fileItem.remove());
+        return fileItem;
+    }
+
+    function deletePredictionImage(imageUrl) {
+        if (!imageUrl) return;
+        const filename = imageUrl.split('/').pop();
+        fetch('/delete_prediction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'deleted') console.log(`Deleted prediction image: ${filename}`);
+            else console.warn('Delete failed:', data);
+        })
+        .catch(err => console.error('Delete error:', err));
+    }  
+
+    // MODIFIED: This function now displays results from both endpoints
+    function updateFileStatus(fileItem, status, data) {
+        const progressBar = fileItem.querySelector('.progress-bar');
+        const statusDot = fileItem.querySelector('.status-dot');
+        const resultContainer = fileItem.querySelector('.result-container');
+        
+        statusDot.className = `status-dot ${status === 'success' ? 'status-success' : 'status-error'}`;
+        progressBar.parentElement.style.display = 'none'; // Hide progress bar on completion
+        
+        if (status === 'success') {
+            // Create a more detailed result view
+            resultContainer.innerHTML = `
+                <div class="flex items-start gap-4">
+                    <img class="result-image rounded border border-gray-200" src="${data.image_url}" style="width: 80px; height: 80px; object-fit: cover;"/>
+                    <div class="result-text text-xs space-y-1">
+                        <div class="text-gray-700">QR: <span class="font-semibold">${data.qr_result}</span></div>
+                        <div class="text-gray-700">Barcode: <span class="font-semibold">${data.barcode_result}</span></div>
+                        <div class="text-gray-700">Sticker: <span class="font-semibold">${data.sticker_status}</span></div>
+                        <div class="text-gray-500">Detail Score: <span class="font-medium">${data.detail_score}</span></div>
+                    </div>
+                </div>
+            `;
+
+            const resultImage = resultContainer.querySelector('.result-image');
+            resultImage.onload = () => {
+                // Once the image is loaded in the browser, tell the server to delete it
+                deletePredictionImage(data.image_url);
+            };
+        } else {
+            // Display error message
+            resultContainer.innerHTML = `
+                <div class="text-xs text-red-600 font-semibold">${data.error || 'Upload failed.'}</div>
+            `;
+        }
+        resultContainer.style.display = 'block';
+    }
+
+    // --- Core Logic (MODIFIED) ---
+    async function uploadFile(fileItem, file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const progressBar = fileItem.querySelector('.progress-bar');
+
+        try {
+            // Use Promise.all to run both API calls concurrently for efficiency
+            const [predictResponse, stickerResponse] = await Promise.all([
+                fetch('/predict', { method: 'POST', body: formData }),
+                fetch('/detect_sticker', { method: 'POST', body: formData })
+            ]);
+            
+            progressBar.style.width = '50%'; // Update progress after fetches start
+
+            // Await the JSON parsing of both responses
+            const predictData = await predictResponse.json();
+            const stickerData = await stickerResponse.json();
+            
+            progressBar.style.width = '100%'; // Final progress update
+
+            // Check if BOTH requests were successful
+            if (predictResponse.ok && stickerResponse.ok) {
+                // Combine the data from both successful responses
+                const combinedData = { ...predictData, ...stickerData };
+                updateFileStatus(fileItem, 'success', combinedData);
+            } else {
+                // If either request fails, show an error
+                const errorData = {
+                    error: predictData.error || stickerData.error || 'One or more analyses failed.'
+                };
+                updateFileStatus(fileItem, 'error', errorData);
+            }
+
+        } catch (error) {
+            console.error('Upload Error:', error);
+            updateFileStatus(fileItem, 'error', { error: 'Network or server error.' });
+        }
+    }
+
+    function handleFiles(files) {
+        Array.from(files).forEach(file => {
+            if (file.size > 50 * 1024 * 1024) { // 50MB
+                alert(`File ${file.name} is too large! Max size is 50MB.`);
+                return;
+            }
+            if (!['image/jpeg', 'image/png'].includes(file.type)) {
+                alert(`File type not supported for ${file.name}. Please use JPG or PNG.`);
+                return;
+            }
+            const fileItem = createFileItem(file);
+            fileList.appendChild(fileItem);
+            uploadFile(fileItem, file); // This now triggers both API calls
+        });
+    }
+
+    // --- Event Listeners ---
+    browseBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+    uploadArea.addEventListener('drop', (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+    closeBtn.addEventListener('click', () => {
+        // Simple close/reset action
+        fileList.innerHTML = '';
+        console.log('UI cleared.');
+    });
+
+</script>
+</body>
+</html>
